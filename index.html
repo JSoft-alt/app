@@ -12,24 +12,27 @@
     <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- Firebase Compat -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <style>
-        body { background-color: #F8FAFC; margin: 0; overflow-x: hidden; font-family: 'Inter', system-ui, sans-serif; }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        body { background-color: #F1F5F9; margin: 0; overflow-x: hidden; font-family: 'Inter', system-ui, sans-serif; font-size: 0.8rem; }
+        input, select, button { font-size: 0.7rem !important; }
+        h1 { font-size: 1.3rem !important; }
+        h2 { font-size: 1rem !important; }
+        h3 { font-size: 0.8rem !important; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-        select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
+        .registry-card { border: 1px solid #E2E8F0; border-radius: 1rem; padding: 0.75rem; background: white; transition: all 0.2s; }
+        .registry-card:hover { border-color: #6366F1; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useCallback, useRef } = React;
+        const { useState, useEffect, useRef } = React;
 
         const firebaseConfig = {
             apiKey: "AIzaSyCLKH_gbj1AG1m0q4ilHwX8QH8LkZKIfbc",
@@ -49,40 +52,28 @@
         const SHIFT_ORDER = ["0-3", "3-6", "6-12", "12-18", "18-24"];
         const SHIFT_DEFS = { "0-3": "00:00-03:00", "3-6": "03:00-06:00", "6-12": "06:00-12:00", "12-18": "12:00-18:00", "18-24": "18:00-00:00" };
 
-        const Icon = ({ name, size = 16, className = "" }) => {
+        const Icon = ({ name, size = 14, className = "" }) => {
             const containerRef = useRef(null);
-            
             useEffect(() => {
                 if (window.lucide && containerRef.current) {
                     containerRef.current.innerHTML = `<i data-lucide="${name}"></i>`;
                     window.lucide.createIcons({
-                        attrs: { 
-                            class: className, 
-                            style: `width: ${size}px; height: ${size}px;` 
-                        },
-                        nameAttr: 'data-lucide',
-                        root: containerRef.current
+                        attrs: { class: className, style: `width: ${size}px; height: ${size}px;` },
+                        nameAttr: 'data-lucide', root: containerRef.current
                     });
                 }
             }, [name, className, size]);
-
-            return (
-                <span 
-                    ref={containerRef} 
-                    className="inline-flex items-center justify-center pointer-events-none"
-                    style={{ width: size, height: size }}
-                />
-            );
+            return <span ref={containerRef} className="inline-flex items-center justify-center pointer-events-none" style={{ width: size, height: size }} />;
         };
 
         const Badge = ({ p }) => {
             if (!p) return null;
             return (
-                <div className="flex gap-1 mt-1.5 flex-wrap">
-                    <div className={`w-2 h-2 rounded-full shadow-sm ${p.isMale ? 'bg-blue-400' : 'bg-pink-400'}`}></div>
-                    {p.isEnglish && <div className="w-2 h-2 rounded-full shadow-sm bg-indigo-500"></div>}
-                    {p.isDriver && <div className="w-2 h-2 rounded-full shadow-sm bg-emerald-500"></div>}
-                    {p.hasCar && <div className="w-2 h-2 rounded-full shadow-sm bg-amber-400"></div>}
+                <div className="flex gap-1 mt-1 flex-wrap">
+                    <div title="Gender" className={`w-2.5 h-2.5 rounded-full ${p.isMale ? 'bg-blue-400' : 'bg-pink-400'}`}></div>
+                    {p.isEnglish && <div title="English" className="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>}
+                    {p.isDriver && <div title="Driver" className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>}
+                    {p.hasCar && <div title="Car" className="w-2.5 h-2.5 rounded-full bg-amber-400"></div>}
                 </div>
             );
         };
@@ -98,399 +89,807 @@
             const [regMode, setRegMode] = useState('view'); 
             const [editingMember, setEditingMember] = useState(null);
             const [loading, setLoading] = useState(false);
+            const [secFilter, setSecFilter] = useState('All');
+            const [isOverrideMode, setIsOverrideMode] = useState(false);
+            const [activeRerollSlot, setActiveRerollSlot] = useState(null); // {dayId, type, blockId, index}
 
             const [dateRange, setDateRange] = useState({
                 start: new Date().toISOString().split('T')[0],
                 end: new Date(Date.now() + 86400000).toISOString().split('T')[0]
             });
             const [arrivalPeriod, setArrivalPeriod] = useState("12-18");
-            const [secForm, setSecForm] = useState({ date: new Date().toISOString().split('T')[0], start: "08:00", end: "17:00" });
+            const [secForm, setSecForm] = useState({ 
+                date: new Date().toISOString().split('T')[0], 
+                start: "08:00", end: "14:00", tunnelPersonnel: 2, theaterPersonnel: 2 
+            });
+
+            // Sync Settings to Firebase
+            const saveAppConfig = async () => {
+                await db.collection('artifacts').doc(APP_ID).collection('public').doc('settings').set({
+                    dateRange,
+                    arrivalPeriod,
+                    lastSaved: Date.now()
+                });
+            };
+
+            // Load Settings on Start
+            useEffect(() => {
+                if (!user) return;
+                db.collection('artifacts').doc(APP_ID).collection('public').doc('settings').get().then(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        setDateRange(data.dateRange);
+                        setArrivalPeriod(data.arrivalPeriod);
+                    }
+                });
+            }, [user]);
 
             useEffect(() => {
                 if (localStorage.getItem('sy_v4_session') === PIN) setIsAuth(true);
-                const unsubscribeAuth = auth.onAuthStateChanged((u) => {
-                    if (u) setUser(u);
-                    else auth.signInAnonymously().catch(console.error);
-                });
-                return () => unsubscribeAuth();
+                const unsubAuth = auth.onAuthStateChanged(u => u ? setUser(u) : auth.signInAnonymously());
+                return unsubAuth;
             }, []);
 
             useEffect(() => {
                 if (!user) return;
                 const base = db.collection('artifacts').doc(APP_ID).collection('public').doc('data');
-                const unsubM = base.collection('members').onSnapshot(s => setMembers(s.docs.map(d => ({...d.data(), id: d.id})).sort((a,b) => a.num - b.num)), err => console.error(err));
-                const unsubR = base.collection('secRules').onSnapshot(s => setSecRules(s.docs.map(d => ({...d.data(), id: d.id}))), err => console.error(err));
-                const unsubS = base.collection('activeSchedule').doc('current').onSnapshot(s => s.exists && setSchedule(s.data()), err => console.error(err));
+                const unsubM = base.collection('members').onSnapshot(s => setMembers(s.docs.map(d => ({...d.data(), id: d.id})).sort((a,b) => a.num - b.num)));
+                const unsubR = base.collection('secRules').onSnapshot(s => setSecRules(s.docs.map(d => ({...d.data(), id: d.id}))));
+                const unsubS = base.collection('activeSchedule').doc('current').onSnapshot(s => s.exists && setSchedule(s.data()));
                 return () => { unsubM(); unsubR(); unsubS(); };
             }, [user]);
 
-            const saveSchedule = async (newDays) => {
-                if (!user) return;
-                await db.collection('artifacts').doc(APP_ID).collection('public').doc('data')
-                    .collection('activeSchedule').doc('current').set({ days: newDays, updatedAt: Date.now() });
-            };
-
-            const toggleMemberStatus = async (m) => {
-                if (!user) return;
-                try {
-                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data')
-                        .collection('members').doc(m.id).update({ inPool: !m.inPool });
-                } catch (e) { console.error(e); }
-            };
-
             const bulkTogglePool = async (status) => {
-                if (!user) return;
                 const batch = db.batch();
                 members.forEach(m => {
-                    const ref = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('members').doc(m.id);
-                    batch.update(ref, { inPool: status });
+                    batch.update(db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('members').doc(m.id), { inPool: status });
                 });
                 await batch.commit();
             };
 
-            const getRandomFromPool = (pool, excludeNums = []) => {
-                const available = pool.filter(p => !excludeNums.includes(p.num));
-                if (available.length === 0) return pool[Math.floor(Math.random() * pool.length)];
-                return available[Math.floor(Math.random() * available.length)];
-            };
-
-            const generateSchedule = async () => {
-                const pool = members.filter(m => m.inPool);
-                if (pool.length < 5) { alert("Registry too small."); return; }
-                
-                setLoading(true);
-
-                // Create a 2-second delay
-                const delay = new Promise(resolve => setTimeout(resolve, 2000));
-
-                const generatedDays = [];
-                let dIter = new Date(dateRange.start + "T00:00:00");
-                const dEnd = new Date(dateRange.end + "T00:00:00");
-
-                while (dIter <= dEnd) {
-                    const iso = dIter.toISOString().split('T')[0];
-                    const dailyBusy = new Set();
-                    const day = { id: crypto.randomUUID(), date: iso, label: dIter.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }), security: [], shifts: [] };
-
-                    secRules.filter(r => r.date === iso).forEach(rule => {
-                        const engPool = pool.filter(p => !dailyBusy.has(p.num) && p.isEnglish);
-                        const p1 = engPool.length ? engPool[Math.floor(Math.random() * engPool.length)] : getRandomFromPool(pool, Array.from(dailyBusy));
-                        dailyBusy.add(p1.num);
-                        const p2 = getRandomFromPool(pool, Array.from(dailyBusy));
-                        dailyBusy.add(p2.num);
-                        day.security.push({ id: crypto.randomUUID(), time: rule.time, players: [p1, p2] });
-                    });
-
-                    const startIndex = (iso === dateRange.start) ? SHIFT_ORDER.indexOf(arrivalPeriod) : 0;
-                    SHIFT_ORDER.slice(startIndex).forEach(key => {
-                        const p1 = getRandomFromPool(pool, Array.from(dailyBusy)); dailyBusy.add(p1.num);
-                        const p2 = getRandomFromPool(pool, Array.from(dailyBusy)); dailyBusy.add(p2.num);
-                        day.shifts.push({ id: crypto.randomUUID(), time: SHIFT_DEFS[key], players: [p1, p2] });
-                    });
-                    generatedDays.push(day);
-                    dIter.setDate(dIter.getDate() + 1);
-                }
-
-                // Wait for both the schedule generation and the 2-second delay to complete
-                await Promise.all([saveSchedule(generatedDays), delay]);
-                setLoading(false);
-            };
-
-            const rerollPerson = (dayId, sectionType, blockId, personIndex) => {
-                const pool = members.filter(m => m.inPool);
-                const newDays = JSON.parse(JSON.stringify(schedule.days));
-                const day = newDays.find(d => d.id === dayId);
-                const busy = new Set();
-                day.security.forEach(s => s.players.forEach(p => busy.add(p.num)));
-                day.shifts.forEach(s => s.players.forEach(p => busy.add(p.num)));
-                const targetBlock = sectionType === 'security' ? day.security.find(s => s.id === blockId) : day.shifts.find(s => s.id === blockId);
-                busy.delete(targetBlock.players[personIndex].num);
-                targetBlock.players[personIndex] = getRandomFromPool(pool, Array.from(busy));
-                saveSchedule(newDays);
-            };
-
-            const rerollBlock = (dayId, sectionType, blockId) => {
-                const pool = members.filter(m => m.inPool);
-                const newDays = JSON.parse(JSON.stringify(schedule.days));
-                const day = newDays.find(d => d.id === dayId);
-                const busy = new Set();
-                day.security.forEach(s => s.id !== blockId && s.players.forEach(p => busy.add(p.num)));
-                day.shifts.forEach(s => s.id !== blockId && s.players.forEach(p => busy.add(p.num)));
-                const targetBlock = sectionType === 'security' ? day.security.find(s => s.id === blockId) : day.shifts.find(s => s.id === blockId);
-                const p1 = getRandomFromPool(pool, Array.from(busy)); busy.add(p1.num);
-                const p2 = getRandomFromPool(pool, Array.from(busy));
-                targetBlock.players = [p1, p2];
-                saveSchedule(newDays);
-            };
-
-            const addSecurityRule = () => {
+            // Add this useEffect to load the saved config on start
+            useEffect(() => {
                 if (!user) return;
-                const newTime = `${secForm.start}-${secForm.end}`;
-                if (secRules.some(r => r.date === secForm.date && r.time === newTime)) return;
-                db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').add({date: secForm.date, time: newTime});
+                const configRef = db.collection('artifacts').doc(APP_ID).collection('public').doc('config');
+                configRef.onSnapshot(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        if (data.dateRange) setDateRange(data.dateRange);
+                        if (data.arrivalPeriod) setArrivalPeriod(data.arrivalPeriod);
+                        // Members inPool status is already handled by the members collection snapshot
+                    }
+                });
+            }, [user]);
+
+            // Function to manually save the current state
+            const saveCurrentConfig = async () => {
+                await db.collection('artifacts').doc(APP_ID).collection('public').doc('config').set({
+                    dateRange,
+                    arrivalPeriod,
+                    updatedAt: Date.now()
+                });
+            };
+
+            // Update the togglePool function to save the change immediately
+            const togglePool = (m) => {
+                db.collection('artifacts').doc(APP_ID).collection('public').doc('data')
+                .collection('members').doc(m.id).update({ inPool: !m.inPool });
+            };
+
+            const deleteSecRules = async () => {
+                if (confirm("Delete all security rules for this day?")) {
+                    const batch = db.batch();
+                    secRules.filter(r => r.date === secForm.date).forEach(r => batch.delete(db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').doc(r.id)));
+                    await batch.commit();
+                }
+            };
+
+            const addTunnelSecurity = async () => {
+                // Block if staff/doors <= 0 or date out of range
+                if (secForm.tunnelPersonnel < 1) return;
+                if (secForm.date < dateRange.start || secForm.date > dateRange.end) return;
+
+                const segments = splitIntoSixHourShifts(secForm.start, secForm.end);
+                
+                // Block if shift time already exists for this date
+                const isDuplicate = secRules.some(r => 
+                    r.date === secForm.date && 
+                    r.type === 'Tunnel' && 
+                    segments.includes(r.time)
+                );
+                if (isDuplicate) return;
+
+                const batch = db.batch();
+                segments.forEach(timeRange => {
+                    const ref = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').doc();
+                    batch.set(ref, { 
+                        date: secForm.date, 
+                        time: timeRange, 
+                        type: 'Tunnel', 
+                        personnel: Math.max(1, secForm.tunnelPersonnel) 
+                    });
+                });
+                await batch.commit();
+            };
+
+            const handleTheaterToggle = async (date, perfTime) => {
+                // Block if out of range or personnel invalid
+                if (date < dateRange.start || date > dateRange.end) return;
+                if (secForm.theaterPersonnel < 1) return;
+
+                const existing = secRules.find(r => r.date === date && r.performanceTime === perfTime);
+                if (existing) {
+                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').doc(existing.id).delete();
+                    return;
+                }
+                
+                const [hrs, mins] = perfTime.split(':').map(Number);
+                const startDt = new Date(); startDt.setHours(hrs, mins);
+                const sT = new Date(startDt.getTime() - (2.5 * 60 * 60 * 1000));
+                const eT = new Date(startDt.getTime() + (2.75 * 60 * 60 * 1000));
+                
+                await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').add({
+                    date, 
+                    time: `${sT.toTimeString().slice(0,5)}-${eT.toTimeString().slice(0,5)}`, 
+                    type: 'Theater', 
+                    personnel: Math.max(1, secForm.theaterPersonnel), 
+                    performanceTime: perfTime
+                });
             };
 
             const saveMember = async (e) => {
                 e.preventDefault();
-                if (!user) return;
                 const fd = new FormData(e.target);
-                const data = { num: Number(fd.get('num')), name: fd.get('name'), isMale: fd.get('gender') === 'male', isEnglish: fd.has('eng'), isDriver: fd.has('drv'), hasCar: fd.has('car'), inPool: true };
+                const newNum = Number(fd.get('num'));
+                
+                // Block if ID is not unique
+                const isDuplicateId = members.some(m => m.num === newNum && (!editingMember || m.id !== editingMember.id));
+                if (isDuplicateId) return;
+                
+                const data = { 
+                    num: newNum, 
+                    name: fd.get('name'), 
+                    isMale: fd.get('gender')==='male', 
+                    isEnglish: fd.has('eng'), 
+                    isDriver: fd.has('drv'), 
+                    hasCar: fd.has('car'), 
+                    inPool: true 
+                };
+                
                 const col = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('members');
-                if (editingMember) await col.doc(editingMember.id).update(data);
-                else await col.add(data);
+                editingMember ? await col.doc(editingMember.id).update(data) : await col.add(data);
                 setEditingMember(null); setRegMode('view');
             };
 
+            // Helper: Converts "HH:mm-HH:mm" to {start: mins, end: mins}
+            const getTimeRange = (str) => {
+                const [s, e] = str.split('-').map(t => {
+                    const [h, m] = t.split(':').map(Number);
+                    return h * 60 + m;
+                });
+                return { start: s, end: e <= s ? e + 1440 : e }; // Handle midnight wrap
+            };
+
+            // Helper: Checks if two ranges overlap
+            const isOverlapping = (r1, r2) => (r1.start < r2.end && r2.start < r1.end);
+
+            const getRandomFromPool = (pool, excludeNums = [], requirements = {}) => {
+                const { mustEng = false, mustDrv = false, mustMale = false, noNums = [] } = requirements;
+                
+                const shuffle = (list) => {
+                    let shuffled = [...list];
+                    for (let i = shuffled.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                    }
+                    return shuffled;
+                };
+
+                const applyFilters = (list) => {
+                    let f = list.filter(p => ![19, 20].includes(p.num));
+                    if (mustMale) f = f.filter(p => p.isMale);
+                    if (mustDrv) f = f.filter(p => p.isDriver);
+                    if (mustEng) {
+                        const eng = f.filter(p => p.isEnglish);
+                        if (eng.length > 0) f = eng;
+                    } else {
+                        const nonEng = f.filter(p => !p.isEnglish);
+                        if (nonEng.length > 0) f = nonEng;
+                    }
+                    return f;
+                };
+
+                // Strict Attempt: No overlaps (excludeNums) and no consecutive (noNums)
+                let av = pool.filter(p => !excludeNums.includes(p.num) && !noNums.includes(p.num));
+                let candidates = applyFilters(av);
+
+                // Fallback: Relax consecutive rule if pool is empty
+                if (candidates.length === 0) {
+                    av = pool.filter(p => !excludeNums.includes(p.num));
+                    candidates = applyFilters(av);
+                }
+
+                const finalPool = shuffle(candidates);
+                return finalPool.length > 0 ? finalPool[0] : null;
+            };
+
+            const generateSchedule = async () => {
+                const pool = members.filter(m => m.inPool);
+                if (pool.length < 2) return alert("Active Pool needs more members.");
+                
+                setLoading(true);
+                const generatedDays = [];
+                let dIter = new Date(dateRange.start + "T00:00:00");
+                const dEnd = new Date(dateRange.end + "T00:00:00");
+                let globalLastAssignedNums = []; 
+
+                while (dIter <= dEnd) {
+                    const iso = dIter.toISOString().split('T')[0];
+                    const isFirstDay = iso === dateRange.start;
+                    const dailyAssignments = []; 
+                    const day = { 
+                        id: crypto.randomUUID(), date: iso, 
+                        label: dIter.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }), 
+                        tunnelSec: [], theaterSec: [], shifts: [] 
+                    };
+
+                    const getOverlapExclusions = (timeStr) => {
+                        const currentRange = getTimeRange(timeStr);
+                        return dailyAssignments
+                            .filter(a => isOverlapping(a.range, currentRange))
+                            .map(a => a.num);
+                    };
+
+                    let endOfDayAssigned = [];
+
+                    // PRIORITY 1: Theater Security (STRICT ENGLISH)
+                    secRules.filter(r => r.date === iso && r.type === 'Theater').forEach(rule => {
+                        const assigned = [];
+                        for(let i=0; i<(rule.personnel || 2); i++){
+                            const p = getRandomFromPool(pool, [...getOverlapExclusions(rule.time), ...assigned.map(a=>a.num)], { 
+                                mustEng: true, 
+                                noNums: globalLastAssignedNums 
+                            });
+                            if(p) { 
+                                assigned.push(p); 
+                                dailyAssignments.push({num: p.num, range: getTimeRange(rule.time)});
+                                if (getTimeRange(rule.time).end >= 1440) endOfDayAssigned.push(p.num);
+                            }
+                        }
+                        day.theaterSec.push({ id: crypto.randomUUID(), time: rule.time, players: assigned });
+                    });
+
+                    // PRIORITY 2: Bus Watch Rotation
+                    // Calculate starting shift: If it's the first day, skip shifts before arrivalPeriod
+                    const startIdx = isFirstDay ? SHIFT_ORDER.indexOf(arrivalPeriod) : 0;
+
+                    SHIFT_ORDER.slice(startIdx).forEach((key) => {
+                        const assigned = [];
+                        const timeLabel = SHIFT_DEFS[key];
+                        const isNight = ["18-24", "0-3", "3-6"].includes(key);
+                        
+                        for(let i=0; i<2; i++) {
+                            const p = getRandomFromPool(pool, [...getOverlapExclusions(timeLabel), ...assigned.map(a=>a.num)], { 
+                                noNums: globalLastAssignedNums, 
+                                mustMale: (isNight && i === 0),
+                                mustDrv: (key === "12-18")
+                            });
+                            if(p) { 
+                                assigned.push(p); 
+                                dailyAssignments.push({num: p.num, range: getTimeRange(timeLabel)});
+                                if (key === "18-24") endOfDayAssigned.push(p.num);
+                            }
+                        }
+                        day.shifts.push({ id: crypto.randomUUID(), time: timeLabel, players: assigned });
+                    });
+
+                    // PRIORITY 3: Tunnel Security
+                    secRules.filter(r => r.date === iso && r.type === 'Tunnel').forEach(rule => {
+                        const assigned = [];
+                        for(let i=0; i<(rule.personnel || 2); i++){
+                            const p = getRandomFromPool(pool, [...getOverlapExclusions(rule.time), ...assigned.map(a=>a.num)], { 
+                                mustEng: false, noNums: globalLastAssignedNums 
+                            });
+                            if(p) { 
+                                assigned.push(p); 
+                                dailyAssignments.push({num: p.num, range: getTimeRange(rule.time)});
+                                if (getTimeRange(rule.time).end >= 1440) endOfDayAssigned.push(p.num);
+                            }
+                        }
+                        day.tunnelSec.push({ id: crypto.randomUUID(), time: rule.time, players: assigned });
+                    });
+
+                    globalLastAssignedNums = [...endOfDayAssigned];
+                    generatedDays.push(day);
+                    dIter.setDate(dIter.getDate() + 1);
+                }
+                
+                await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('activeSchedule').doc('current').set({ days: generatedDays });
+                setLoading(false);
+            };
+
+            // Logic: Ensures Tunnel shifts are exactly 6 hours
+            const splitIntoSixHourShifts = (startStr, endStr) => {
+                const shifts = [];
+                let current = parseInt(startStr.split(':')[0]);
+                const end = parseInt(endStr.split(':')[0]);
+                const effectiveEnd = end <= current ? end + 24 : end;
+                
+                while (current < effectiveEnd) {
+                    let segmentEnd = current + 6; // Force exactly 6 hours
+                    if (segmentEnd > effectiveEnd) segmentEnd = effectiveEnd;
+                    
+                    const format = (h) => `${(h % 24).toString().padStart(2, '0')}:00`;
+                    shifts.push(`${format(current)}-${format(segmentEnd)}`);
+                    current = segmentEnd;
+                }
+                return shifts;
+            };
+
+            const rerollPerson = async (dayId, secTypeKey, blockId, personIndex) => {
+                const pool = members.filter(m => m.inPool);
+                const newDays = JSON.parse(JSON.stringify(schedule.days));
+                const day = newDays.find(d => d.id === dayId);
+                
+                const blockToReroll = day[secTypeKey].find(s => s.id === blockId);
+                const timeRangeToReroll = getTimeRange(blockToReroll.time);
+
+                // 1. Calculate overlaps
+                const dailyAssignments = [];
+                [...(day.tunnelSec || []), ...(day.theaterSec || []), ...(day.shifts || [])].forEach(s => {
+                    s.players.forEach(p => {
+                        if (p) dailyAssignments.push({ num: p.num, range: getTimeRange(s.time), blockId: s.id });
+                    });
+                });
+
+                const overlappingIds = dailyAssignments
+                    .filter(a => isOverlapping(a.range, timeRangeToReroll) && a.blockId !== blockId)
+                    .map(a => a.num);
+
+                // 2. Exclude other person in same shift
+                const otherPersonInShift = blockToReroll.players
+                    .filter((_, idx) => idx !== personIndex)
+                    .map(p => p?.num);
+
+                const requirements = {
+                    mustEng: (secTypeKey === 'theaterSec' && personIndex === 0),
+                    mustMale: (["18-24", "0-3", "3-6"].includes(blockToReroll.time) && personIndex === 0),
+                    mustDrv: (blockToReroll.time === "12:00-18:00")
+                };
+
+                // 3. Find candidate with Fallback System
+                const newPerson = getRandomFromPool(pool, [...overlappingIds, ...otherPersonInShift], requirements);
+                
+                if (newPerson) {
+                    blockToReroll.players[personIndex] = newPerson;
+                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data')
+                        .collection('activeSchedule').doc('current').set({ days: newDays });
+                }
+            };
+
+            const rerollBlock = async (dayId, secTypeKey, blockId) => {
+                const pool = members.filter(m => m.inPool);
+                const newDays = JSON.parse(JSON.stringify(schedule.days));
+                const day = newDays.find(d => d.id === dayId);
+                
+                const block = day[secTypeKey].find(s => s.id === blockId);
+                const timeRange = getTimeRange(block.time);
+
+                const dailyAssignments = [];
+                [...(day.tunnelSec || []), ...(day.theaterSec || []), ...(day.shifts || [])].forEach(s => {
+                    if (s.id !== blockId) {
+                        s.players.forEach(p => {
+                            if (p) dailyAssignments.push({ num: p.num, range: getTimeRange(s.time) });
+                        });
+                    }
+                });
+
+                const overlappingIds = dailyAssignments
+                    .filter(a => isOverlapping(a.range, timeRange))
+                    .map(a => a.num);
+
+                const newPlayers = [];
+                // Re-populate the exact amount of personnel required
+                const personnelCount = block.personnel || block.players.length || 2; 
+
+                for (let i = 0; i < personnelCount; i++) {
+                    const requirements = {
+                        mustEng: (secTypeKey === 'theaterSec' && i === 0),
+                        mustMale: (["18-24", "0-3", "3-6"].includes(block.time) && i === 0),
+                        mustDrv: (block.time === "12:00-18:00")
+                    };
+
+                    const p = getRandomFromPool(pool, [...overlappingIds, ...newPlayers.map(np => np.num)], requirements);
+                    if (p) newPlayers.push(p);
+                }
+
+                if (newPlayers.length > 0) {
+                    block.players = newPlayers;
+                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data')
+                        .collection('activeSchedule').doc('current').set({ days: newDays });
+                }
+            };
+
+            const filteredRules = secRules.filter(r => {
+                // If "All" is selected, show everything. Otherwise, filter by date and type.
+                if (secFilter === 'All') return true;
+                
+                // If Tunnel or Theater is selected, only show them for the currently selected date
+                return r.date === secForm.date && r.type === secFilter;
+            }).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+
             return (
-                <div className="min-h-screen relative overflow-x-hidden">
-                    {/* LOGIN VIEW */}
-                    {!isAuth && (
-                        <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6 z-[300] fixed inset-0">
-                            <div className="bg-white p-10 rounded-[3rem] w-full max-w-md text-center shadow-2xl">
-                                <Icon name="lock" size={48} className="text-indigo-600 mb-6 mx-auto" />
-                                <h2 className="text-2xl font-black uppercase mb-8 tracking-tight">Access Portal</h2>
-                                <form onSubmit={(e) => {e.preventDefault(); if (pinInput === PIN) {setIsAuth(true); localStorage.setItem('sy_v4_session', PIN);}}} className="space-y-4">
-                                    <input type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="••••" className="w-full bg-slate-100 p-6 rounded-3xl text-center text-3xl font-black outline-none focus:ring-4 ring-indigo-50 transition-all" />
-                                    <button className="w-full bg-indigo-600 text-white py-5 rounded-3xl font-black uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-transform">Unlock</button>
-                                </form>
+                <div className="min-h-screen pb-10">
+                    {!isAuth ? (
+                        <div className="fixed inset-0 bg-slate-900 flex items-center justify-center z-[999]">
+                            <div className="bg-white p-8 rounded-[2rem] shadow-2xl text-center w-80">
+                                <Icon name="lock" size={40} className="mx-auto mb-4 text-indigo-600" />
+                                <h2 className="text-xl font-black mb-6 uppercase">Admin Lock</h2>
+                                <input type="password" value={pinInput} onChange={e=>setPinInput(e.target.value)} className="w-full bg-slate-100 p-4 rounded-xl text-center text-xl font-black mb-4 outline-none border-2 focus:border-indigo-500" placeholder="PIN" />
+                                <button onClick={()=>{if(pinInput===PIN)setIsAuth(true)}} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-black uppercase shadow-lg">Unlock</button>
                             </div>
                         </div>
-                    )}
-
-                    {/* DASHBOARD VIEW */}
-                    {isAuth && (
-                        <div className="min-h-screen pb-20">
-                            {!user && (
-                                <div className="fixed inset-0 bg-white/80 z-[200] flex items-center justify-center">
-                                    <div className="text-center">
-                                        <Icon name="loader" size={40} className="animate-spin text-indigo-600 mx-auto mb-4" />
-                                        <p className="font-black text-xs uppercase tracking-widest text-slate-500">Establishing Secure Link...</p>
-                                    </div>
+                    ) : (
+                        <div className="max-w-[1550px] mx-auto p-4">
+                            <header className="bg-white p-6 rounded-[2rem] border shadow-sm mb-6 flex flex-col lg:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="bg-slate-900 p-3 rounded-xl text-white"><Icon name="shield" size={24} /></div>
+                                    <h1 className="text-xl font-black uppercase italic tracking-tighter leading-none">Shift Master <span className="text-indigo-600">MAX</span></h1>
                                 </div>
-                            )}
-                            <div className="max-w-[1400px] mx-auto p-4 lg:p-10">
-                                <header className="bg-white p-7 rounded-[2.5rem] border shadow-sm mb-10 flex flex-col md:flex-row justify-between items-center gap-6">
-                                    <div className="flex items-center gap-5">
-                                        <div className="bg-slate-900 p-4 rounded-2xl text-white shadow-lg shadow-slate-200"><Icon name="shield" size={28} /></div>
-                                        <div>
-                                            <h1 className="text-2xl font-black uppercase tracking-tighter italic leading-none">Shift Master <span className="text-indigo-600">MAX</span></h1>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1.5">System Performance v4.0</p>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setIsRegistryOpen(true)} className="bg-slate-50 border px-5 py-3 rounded-xl font-black uppercase flex items-center gap-2 hover:bg-slate-100"><Icon name="users" /> Registry</button>
+                                    <button onClick={generateSchedule} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black uppercase flex items-center gap-2 shadow-lg hover:bg-indigo-700 active:scale-95 transition-all"><Icon name="refresh-cw" className={loading?"animate-spin":""} /> Generate</button>
+                                </div>
+                            </header>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                <aside className="lg:col-span-3 space-y-8">
+                                    {/* 1. Operational Window - Spacious Layout */}
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <h3 className="text-xs font-black uppercase text-slate-400 flex items-center gap-2">
+                                                <Icon name="calendar" /> Operational Window
+                                            </h3>
+                                            <button onClick={saveAppConfig} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-100 transition-all">
+                                                Save Config
+                                            </button>
+                                        </div>
+                                        <div className="space-y-5">
+                                            <div className="flex flex-col gap-2">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Start Date</label>
+                                                <input type="date" value={dateRange.start} 
+                                                    onChange={e => setDateRange(prev => ({...prev, start: e.target.value, end: e.target.value > prev.end ? e.target.value : prev.end}))} 
+                                                    className="w-full p-4 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 transition-all" />
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">End Date</label>
+                                                <input type="date" value={dateRange.end} min={dateRange.start} 
+                                                    onChange={e => setDateRange({...dateRange, end: e.target.value})} 
+                                                    className="w-full p-4 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 transition-all" />
+                                            </div>
+                                            {/* Restored Arrival Window Selector */}
+                                            <div className="flex flex-col gap-2">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Bus Arrival (Day 1)</label>
+                                                <select value={arrivalPeriod} onChange={e => setArrivalPeriod(e.target.value)} 
+                                                    className="w-full p-4 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 transition-all appearance-none">
+                                                    {SHIFT_ORDER.map(s => <option key={s} value={s}>{SHIFT_DEFS[s]}</option>)}
+                                                </select>
+                                                <p className="text-[9px] text-slate-400 italic ml-1 leading-tight">Shifts before this window will be skipped on the start date.</p>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="flex gap-3">
-                                        <button onClick={() => setIsRegistryOpen(true)} className="bg-slate-50 border px-6 py-4 rounded-2xl font-black text-[11px] uppercase flex items-center gap-3 hover:bg-slate-100 transition-colors"><Icon name="users" size={16} /> Registry</button>
-                                        <button onClick={generateSchedule} disabled={loading} className={`bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-[11px] uppercase flex items-center gap-3 shadow-xl shadow-indigo-100 active:scale-95 transition-all ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}>
-                                            {loading ? <Icon name="refresh-cw" className="animate-spin" /> : <Icon name="refresh-cw" />} Reroll Full Range
-                                        </button>
-                                    </div>
-                                </header>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-                                    <aside className="lg:col-span-3 space-y-8">
-                                        <div className="bg-white p-7 rounded-[2.5rem] border shadow-sm">
-                                            <h3 className="text-[11px] font-black uppercase text-slate-400 mb-6 tracking-widest flex items-center gap-2"><Icon name="settings" size={14}/> Range Settings</h3>
-                                            <div className="space-y-4">
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-black uppercase text-slate-400 ml-2">Start Date</label>
-                                                    <input type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl font-bold text-xs outline-none focus:ring-2 ring-indigo-50" />
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-black uppercase text-slate-400 ml-2">End Date</label>
-                                                    <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl font-bold text-xs outline-none focus:ring-2 ring-indigo-50" />
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-black uppercase text-slate-400 ml-2">Arrival Period</label>
-                                                    <select value={arrivalPeriod} onChange={e => setArrivalPeriod(e.target.value)} className="w-full p-4 bg-slate-50 border rounded-2xl font-bold text-xs outline-none focus:ring-2 ring-indigo-50 appearance-none">
-                                                        {SHIFT_ORDER.map(s => <option key={s} value={s}>{SHIFT_DEFS[s]}</option>)}
-                                                    </select>
-                                                </div>
+                                    {/* 2. Security Config - Fixed Overflow & Alignment */}
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <h3 className="text-xs font-black uppercase text-indigo-600 mb-6 flex items-center gap-2">
+                                            <Icon name="plus-circle" /> Security Config
+                                        </h3>
+                                        <div className="space-y-6">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Configuration Date</label>
+                                                <input type="date" value={secForm.date} onChange={e => setSecForm({...secForm, date: e.target.value})} 
+                                                    className="w-full p-4 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500" />
                                             </div>
-                                        </div>
-                                        
-                                        <div className="bg-white p-7 rounded-[2.5rem] border shadow-sm">
-                                            <h3 className="text-[11px] font-black uppercase text-indigo-600 mb-6 tracking-widest flex items-center gap-2"><Icon name="plus-circle" size={14}/> Add Security</h3>
-                                            <div className="space-y-4">
-                                                <input type="date" value={secForm.date} onChange={e => setSecForm({...secForm, date: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl text-xs outline-none font-bold" />
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <input type="time" value={secForm.start} onChange={e => setSecForm({...secForm, start: e.target.value})} className="p-3 border rounded-xl text-xs font-bold" />
-                                                    <input type="time" value={secForm.end} onChange={e => setSecForm({...secForm, end: e.target.value})} className="p-3 border rounded-xl text-xs font-bold" />
-                                                </div>
-                                                <button onClick={addSecurityRule} className="w-full bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-lg active:scale-95 transition-transform">Add Rule</button>
-                                            </div>
-                                            <div className="mt-6 space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
-                                                {secRules.map(r => (
-                                                    <div key={`secrule-item-${r.id}`} className="text-[9px] font-bold p-3 bg-slate-50 rounded-xl flex justify-between items-center border border-slate-100">
-                                                        <span>{r.date} @ {r.time}</span>
-                                                        <button onClick={() => db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').doc(r.id).delete()} className="text-rose-500 hover:scale-110 transition-transform"><Icon name="trash" size={12}/></button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-white p-7 rounded-[2.5rem] border shadow-sm">
-                                            <div className="flex justify-between items-center mb-6">
-                                                <h3 className="text-[11px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Icon name="user-check" size={14}/> Active Pool</h3>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => bulkTogglePool(true)} className="text-[8px] font-black text-indigo-600 uppercase hover:underline">All</button>
-                                                    <button onClick={() => bulkTogglePool(false)} className="text-[8px] font-black text-rose-500 uppercase hover:underline">None</button>
-                                                </div>
-                                            </div>
-                                            <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
-                                                {members.map(m => (
-                                                    <div 
-                                                        key={`pool-card-${m.id}`} 
-                                                        onClick={() => toggleMemberStatus(m)}
-                                                        className={`p-3 rounded-2xl border flex items-center justify-between cursor-pointer transition-all ${m.inPool ? 'bg-indigo-50 border-indigo-100 text-indigo-900 shadow-sm' : 'bg-white border-slate-100 opacity-40 grayscale'}`}
-                                                    >
-                                                        <div className="flex items-center gap-3 pointer-events-none">
-                                                            <span className="w-5 h-5 rounded bg-slate-900 text-white text-[9px] font-black flex items-center justify-center">{m.num}</span>
-                                                            <span className="text-[11px] font-bold truncate max-w-[100px]">{m.name}</span>
-                                                        </div>
-                                                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors pointer-events-none ${m.inPool ? 'bg-indigo-600 border-indigo-600' : 'bg-transparent border-slate-200'}`}>
-                                                            {m.inPool && <Icon name="check" size={10} className="text-white"/>}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </aside>
-
-                                    <main className="lg:col-span-9 space-y-10">
-                                        {schedule.days.map(day => (
-                                            <div key={`day-card-${day.id}`} className="bg-white rounded-[3.5rem] border shadow-sm overflow-hidden">
-                                                <div className="bg-slate-900 px-10 py-6 flex justify-between items-center text-white">
-                                                    <div>
-                                                        <h2 className="text-sm font-black uppercase tracking-[0.2em] italic">{day.label}</h2>
-                                                        <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">{day.date}</p>
+                                            
+                                            {/* Tunnel Input Row - Wider Inputs */}
+                                            <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1">
+                                                        <Icon name="door-closed" size={12}/> Tunnel
+                                                    </p>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Doors:</span>
+                                                        <input type="number" min="1" value={secForm.tunnelPersonnel} 
+                                                            onChange={e => {
+                                                                const val = parseInt(e.target.value);
+                                                                if (val > 0) setSecForm({...secForm, tunnelPersonnel: val});
+                                                            }} 
+                                                            className="w-20 p-2 bg-white border rounded-lg text-center font-bold text-xs" 
+                                                        />
                                                     </div>
                                                 </div>
-                                                <div className="p-10 space-y-10">
-                                                    {day.security?.length > 0 && (
-                                                        <div className="space-y-4">
-                                                            <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest ml-4">Security Personnel</h4>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-indigo-50/50 p-6 rounded-[2.5rem] border border-indigo-100">
-                                                                {day.security.map((s) => (
-                                                                    <div key={`sec-block-${s.id}`} className="bg-white p-4 rounded-3xl border shadow-sm relative group">
-                                                                        <div className="flex justify-between items-center mb-3">
-                                                                            <span className="text-[10px] font-black text-indigo-600 italic tracking-tight">{s.time}</span>
-                                                                            <button onClick={() => rerollBlock(day.id, 'security', s.id)} className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-slate-50 rounded-lg text-slate-400 hover:text-indigo-600"><Icon name="refresh-ccw" size={12}/></button>
-                                                                        </div>
-                                                                        <div className="grid grid-cols-2 gap-3">
-                                                                            {s.players.map((p, j) => (
-                                                                                <div key={`sec-player-${s.id}-${j}`} className="bg-slate-50 p-3 rounded-2xl text-[11px] font-bold border border-slate-100 flex flex-col relative group/p">
-                                                                                    <span className="truncate pr-4">{p?.name || "Unassigned"}</span> 
-                                                                                    <Badge p={p}/>
-                                                                                    <button onClick={() => rerollPerson(day.id, 'security', s.id, j)} className="absolute top-2 right-2 opacity-0 group-p/p:opacity-100 p-1 text-slate-300 hover:text-indigo-500 transition-all"><Icon name="user-plus" size={12}/></button>
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <input type="time" value={secForm.start} onChange={e => setSecForm({...secForm, start: e.target.value})} 
+                                                        className="flex-1 min-w-[80px] p-2.5 border rounded-xl text-xs font-bold" />
+                                                    <input type="time" value={secForm.end} onChange={e => setSecForm({...secForm, end: e.target.value})} 
+                                                        className="flex-1 min-w-[80px] p-2.5 border rounded-xl text-xs font-bold" />
+                                                    <button onClick={addTunnelSecurity} 
+                                                        className="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] hover:bg-black transition-colors">
+                                                        Add Tunnel Shift
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Theater Row - Wider Inputs */}
+                                            <div className="p-5 bg-indigo-50/50 rounded-3xl border border-indigo-100 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-[10px] font-black uppercase text-indigo-500 flex items-center gap-1">
+                                                        <Icon name="tv" size={12}/> Theater
+                                                    </p>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[9px] font-bold text-indigo-400 uppercase">Staff:</span>
+                                                        <input type="number" min="1" value={secForm.theaterPersonnel} 
+                                                            onChange={e => {
+                                                                const val = parseInt(e.target.value);
+                                                                if (val > 0) setSecForm({...secForm, theaterPersonnel: val});
+                                                            }} 
+                                                            className="w-20 p-2 bg-white border border-indigo-100 rounded text-center font-bold text-xs" 
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {["13:00","13:30","14:00","19:00","19:30"].map(t => (
+                                                        <button key={t} onClick={() => handleTheaterToggle(secForm.date, t)} 
+                                                            className={`p-2 rounded-xl border text-[10px] font-black transition-all ${secRules.some(r => r.date === secForm.date && r.performanceTime === t) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-indigo-50'}`}>
+                                                            {t}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <button onClick={deleteSecRules} className="w-full bg-rose-50 text-rose-600 border border-rose-100 py-4 rounded-2xl font-black uppercase flex items-center justify-center gap-2 hover:bg-rose-100 transition-colors">
+                                                <Icon name="trash-2" /> Clear Day Rules
+                                            </button>
+
+                                            {/* Shift List - Positioned Directly Under the Clear Button */}
+                                            <div className="pt-6 border-t border-slate-100 space-y-4">
+                                                <div className="flex items-center justify-between px-1">
+                                                    <p className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2">
+                                                        <Icon name="list" size={12}/> Shift Master List
+                                                    </p>
+                                                    <div className="flex gap-1">
+                                                        {['All', 'Tunnel', 'Theater'].map(f => (
+                                                            <button key={f} onClick={() => setSecFilter(f)} 
+                                                                className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase transition-all ${secFilter === f ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}>
+                                                                {f}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                                                    {filteredRules.length > 0 ? (
+                                                        filteredRules.map(r => (
+                                                            <div key={r.id} className="p-3 bg-white rounded-xl border border-slate-100 text-[10px] font-bold flex justify-between items-center shadow-sm hover:border-indigo-200 transition-all">
+                                                                <div className="flex flex-col">
+                                                                    <span className={r.type === 'Tunnel' ? 'text-slate-700' : 'text-indigo-600'}>
+                                                                        {r.type} Security
+                                                                    </span>
+                                                                    <span className="text-slate-400 text-[9px]">{r.date} • {r.time}</span>
+                                                                </div>
+                                                                <button onClick={() => db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('secRules').doc(r.id).delete()} 
+                                                                    className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
+                                                                    <Icon name="x-circle" size={16}/>
+                                                                </button>
                                                             </div>
+                                                        ))
+                                                    ) : (
+                                                        <div className="py-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
+                                                            <p className="text-[10px] text-slate-300 font-bold uppercase italic">No shifts found</p>
                                                         </div>
                                                     )}
-                                                    
-                                                    <div className="space-y-4">
-                                                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Standard Shifts</h4>
-                                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-                                                            {day.shifts.map((s) => (
-                                                                <div key={`shift-block-${s.id}`} className="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 flex flex-col group relative hover:border-indigo-200 transition-colors">
-                                                                    <div className="flex justify-between items-center mb-4">
-                                                                        <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter italic">{s.time}</span>
-                                                                        <button onClick={() => rerollBlock(day.id, 'shift', s.id)} className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-indigo-600 transition-all"><Icon name="refresh-cw" size={10}/></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 3. Active Pool - Expanded */}
+                                    <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <h3 className="text-xs font-black uppercase text-slate-400 flex items-center gap-2">
+                                                <Icon name="user-check" /> Active Pool
+                                            </h3>
+                                            <div className="flex gap-3 text-[10px] font-black">
+                                                <button onClick={() => bulkTogglePool(true)} className="text-indigo-600 uppercase hover:underline">All</button>
+                                                <button onClick={() => bulkTogglePool(false)} className="text-rose-500 uppercase hover:underline">None</button>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                                            {members.map(m => (
+                                                <div key={m.id} onClick={() => togglePool(m)} 
+                                                    className={`p-4 rounded-2xl border flex items-center justify-between cursor-pointer transition-all ${m.inPool ? 'bg-indigo-50 border-indigo-100' : 'opacity-40 bg-slate-50'}`}>
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="w-8 h-8 bg-slate-900 text-white rounded-lg text-[11px] font-black flex items-center justify-center">{m.num}</span>
+                                                        <span className="text-sm font-bold leading-none">{m.name}</span>
+                                                    </div>
+                                                    {m.inPool && <Icon name="check-circle" size={16} className="text-indigo-600" />}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </aside>
+
+                                <main className="lg:col-span-9 space-y-8">
+                                    {(schedule?.days || []).map(day => (
+                                        <div key={day.id} className="bg-white rounded-[2.5rem] border shadow-sm overflow-hidden border-slate-200">
+                                            <div className="bg-slate-900 px-8 py-5 text-white flex justify-between items-center">
+                                                <div>
+                                                    <h2 className="uppercase font-black italic tracking-wider">{day.label}</h2>
+                                                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{day.date}</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-8 space-y-10">
+                                                {/* 1. Bus Watch (Standard Shifts) themed in Amber */}
+                                                <div className="space-y-4 mt-2">
+                                                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-500 flex items-center gap-2">
+                                                    <Icon name="bus" size={12}/> Bus Watch Rotation
+                                                </h4>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                    {(day.shifts || []).map((s) => (
+                                                        <div key={s.id} className="bg-amber-50/20 p-6 rounded-[2rem] border-2 border-amber-100/50 group relative shadow-sm hover:bg-amber-50/40 transition-all">
+                                                                <div className="flex justify-between items-start mb-6">
+                                                                    <div>
+                                                                        <p className="text-xs font-black text-amber-500 uppercase tracking-tighter leading-none mb-1">Rotation Shift</p>
+                                                                        <p className="text-xl font-black text-slate-900 leading-none">{s.time}</p>
                                                                     </div>
+                                                                    <button 
+                                                                        onClick={() => rerollBlock(day.id, 'shifts', s.id)} 
+                                                                        className="p-2.5 bg-white rounded-xl shadow-sm border text-amber-400 hover:text-amber-600 transition-all"
+                                                                    >
+                                                                        <Icon name="refresh-cw" size={16}/>
+                                                                    </button>
+                                                                </div>
+                                                                <div className="space-y-2">
                                                                     {s.players.map((p, j) => (
-                                                                        <div key={`shift-player-${s.id}-${j}`} className="bg-white p-3 rounded-2xl text-[10px] font-bold mb-2 shadow-sm border border-slate-100 relative group/p last:mb-0">
-                                                                            <p className="truncate pr-3">{p?.name || "Unassigned"}</p> 
+                                                                        <div key={j} className="bg-white p-4 rounded-2xl relative group/p border-2 border-transparent hover:border-amber-200 shadow-sm transition-all">
+                                                                            <p className="font-black text-sm uppercase leading-tight pr-6">
+                                                                                {p?.name || "Vacant Slot"}
+                                                                            </p>
                                                                             <Badge p={p}/>
-                                                                            <button onClick={() => rerollPerson(day.id, 'shift', s.id, j)} className="absolute top-2 right-2 opacity-0 group-p/p:opacity-100 p-1 text-slate-200 hover:text-indigo-500 transition-all"><Icon name="user-plus" size={10}/></button>
+                                                                            <button 
+                                                                                onClick={() => rerollPerson(day.id, 'shifts', s.id, j)} 
+                                                                                className="absolute top-4 right-4 opacity-0 group-p/p:opacity-100 text-amber-500 hover:scale-110 transition-all"
+                                                                            >
+                                                                                <Icon name="user-plus" size={18}/>
+                                                                            </button>
                                                                         </div>
                                                                     ))}
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* 2. Tunnel Security Section */}
+                                                <div className="space-y-4">
+                                                    <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-2">
+                                                        <Icon name="key" size={12}/> Tunnel Security Deployment
+                                                    </h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {(day.tunnelSec || []).map((s) => (
+                                                            <div key={s.id} className="bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 group relative shadow-sm">
+                                                                <div className="flex justify-between items-start mb-6">
+                                                                    <p className="text-xl font-black text-slate-900 leading-none">{s.time}</p>
+                                                                    <button onClick={() => rerollBlock(day.id, 'tunnelSec', s.id)} className="p-2.5 bg-white rounded-xl shadow-sm border text-slate-400 hover:text-indigo-600 transition-all">
+                                                                        <Icon name="refresh-cw" size={16}/>
+                                                                    </button>
+                                                                </div>
+                                                                <div className="space-y-2">
+                                                                    {s.players.map((p, j) => (
+                                                                        <div key={j} className="bg-white p-4 rounded-2xl relative group/p border-2 border-transparent hover:border-indigo-200 shadow-sm transition-all">
+                                                                            <p className="font-black text-sm uppercase leading-tight pr-6">{p?.name || "Vacant Slot"}</p>
+                                                                            <Badge p={p}/>
+                                                                            <button onClick={() => rerollPerson(day.id, 'tunnelSec', s.id, j)} className="absolute top-4 right-4 opacity-0 group-p/p:opacity-100 text-indigo-500 hover:scale-110 transition-all">
+                                                                                <Icon name="user-plus" size={18}/>
+                                                                            </button>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* 3. Theater Security Section */}
+                                                <div className="space-y-4">
+                                                    <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400 flex items-center gap-2">
+                                                        <Icon name="tv" size={12}/> Theater Security Deployment
+                                                    </h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {(day.theaterSec || []).map((s) => (
+                                                            <div key={s.id} className="bg-indigo-50/20 p-6 rounded-[2rem] border-2 border-indigo-100 group relative shadow-sm">
+                                                                <div className="flex justify-between items-start mb-6">
+                                                                    <p className="text-xl font-black text-indigo-600 leading-none">{s.time}</p>
+                                                                    <button onClick={() => rerollBlock(day.id, 'theaterSec', s.id)} className="p-2.5 bg-white rounded-xl shadow-sm border text-indigo-300 hover:text-indigo-600 transition-all">
+                                                                        <Icon name="refresh-cw" size={16}/>
+                                                                    </button>
+                                                                </div>
+                                                                <div className="space-y-2">
+                                                                    {s.players.map((p, j) => (
+                                                                        <div key={j} className="bg-white p-4 rounded-2xl relative group/p border-2 border-transparent hover:border-indigo-200 shadow-sm transition-all">
+                                                                            <p className="font-black text-sm uppercase leading-tight pr-6">{p?.name || "Vacant Slot"}</p>
+                                                                            <Badge p={p}/>
+                                                                            <button onClick={() => rerollPerson(day.id, 'theaterSec', s.id, j)} className="absolute top-4 right-4 opacity-0 group-p/p:opacity-100 text-indigo-500 hover:scale-110 transition-all">
+                                                                                <Icon name="user-plus" size={18}/>
+                                                                            </button>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </main>
-                                </div>
+                                        </div>
+                                    ))}
+                                </main>
                             </div>
                         </div>
                     )}
-
-                    {/* REGISTRY MODAL */}
+                    
                     {isRegistryOpen && (
-                        <div className="fixed inset-0 z-[400] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-6xl h-[90vh] rounded-[3.5rem] shadow-2xl overflow-hidden flex flex-col">
-                                <div className="bg-slate-900 p-8 text-white flex justify-between items-center shrink-0">
-                                    <div className="flex gap-6">
-                                        <button onClick={() => setRegMode('view')} className={`text-sm font-black uppercase flex items-center gap-3 transition-colors ${regMode === 'view' ? 'text-indigo-400 underline underline-offset-8' : 'text-white hover:text-indigo-200'}`}><Icon name="users" /> Registry List</button>
-                                        <button onClick={() => {setRegMode('add'); setEditingMember(null);}} className={`text-sm font-black uppercase flex items-center gap-3 transition-colors ${regMode === 'add' ? 'text-indigo-400 underline underline-offset-8' : 'text-white hover:text-indigo-200'}`}><Icon name="plus" /> Enrollment</button>
+                        <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4">
+                            <div className="bg-white w-full max-w-6xl h-[90vh] rounded-[3.5rem] overflow-hidden flex flex-col shadow-2xl">
+                                <div className="bg-slate-900 p-8 text-white flex justify-between shrink-0">
+                                    <div className="flex gap-10">
+                                        <button onClick={()=>setRegMode('view')} className={`font-black uppercase text-base flex items-center gap-2 ${regMode==='view'?'text-indigo-400':''}`}><Icon name="list" size={20}/> Member Registry</button>
+                                        <button onClick={()=>{setRegMode('add');setEditingMember(null)}} className={`font-black uppercase text-base flex items-center gap-2 ${regMode==='add'?'text-indigo-400':''}`}><Icon name="user-plus" size={20}/> Enrollment</button>
                                     </div>
-                                    <button onClick={() => {setIsRegistryOpen(false); setRegMode('view'); setEditingMember(null);}} className="hover:rotate-90 transition-transform p-2 bg-white/10 rounded-full"><Icon name="x" size={24} /></button>
+                                    <button onClick={()=>setIsRegistryOpen(false)} className="bg-white/10 p-3 rounded-full hover:bg-white/20 transition-all"><Icon name="x" size={24} /></button>
                                 </div>
-
-                                <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50">
-                                    {(regMode === 'add' || regMode === 'edit') ? (
-                                        <div key={editingMember ? `edit-${editingMember.id}` : 'new-member'} className="w-full max-w-xl mx-auto py-12 px-6">
-                                            <h2 className="text-2xl font-black uppercase mb-8 tracking-tight italic text-center">{regMode === 'add' ? 'New Enrollment' : 'Edit Profile'}</h2>
-                                            <form onSubmit={saveMember} className="space-y-6 bg-white p-8 md:p-12 rounded-[3rem] shadow-xl border border-slate-100">
-                                                <div className="grid grid-cols-4 gap-4">
-                                                    <div className="col-span-1 space-y-1">
-                                                        <label className="text-[9px] font-black uppercase text-slate-400 ml-1">#</label>
-                                                        <input name="num" type="number" defaultValue={editingMember?.num} placeholder="No." className="w-full p-4 rounded-2xl border font-bold text-sm bg-slate-50 focus:ring-4 ring-indigo-50 outline-none transition-all" required />
-                                                    </div>
-                                                    <div className="col-span-3 space-y-1">
-                                                        <label className="text-[9px] font-black uppercase text-slate-400 ml-1">Full Name</label>
-                                                        <input name="name" type="text" defaultValue={editingMember?.name} placeholder="Enter name..." className="w-full p-4 rounded-2xl border font-bold text-sm bg-slate-50 focus:ring-4 ring-indigo-50 outline-none transition-all" required />
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-black uppercase text-slate-400 ml-1">Gender Identification</label>
-                                                    <select name="gender" defaultValue={editingMember?.isMale ? 'male' : 'female'} className="w-full p-4 rounded-2xl border font-bold text-sm bg-slate-50 outline-none appearance-none">
-                                                        <option value="female">Female</option>
-                                                        <option value="male">Male</option>
-                                                    </select>
-                                                </div>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                    {[
-                                                        {k:'eng', l:'English', i:'languages'},
-                                                        {k:'drv', l:'License', i:'user-check'},
-                                                        {k:'car', l:'Vehicle', i:'car'}
-                                                    ].map(({k,l,i}) => (
-                                                        <label key={`check-group-${k}`} className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-100 rounded-[2.5rem] cursor-pointer hover:bg-white hover:shadow-md hover:border-indigo-100 transition-all group">
-                                                            <div className={`p-3 rounded-xl bg-indigo-50 text-indigo-500 mb-3 group-hover:scale-110 transition-transform`}>
-                                                                <Icon name={i} size={28} />
-                                                            </div>
-                                                            <span className="text-[10px] font-black uppercase mb-3 tracking-widest">{l}</span>
-                                                            <input type="checkbox" name={k} defaultChecked={editingMember?.[k === 'eng' ? 'isEnglish' : k === 'drv' ? 'isDriver' : 'hasCar']} className="w-7 h-7 accent-indigo-600 rounded-lg cursor-pointer" />
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                                <button className="w-full bg-indigo-600 text-white py-6 rounded-3xl font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-transform mt-4">
-                                                    {regMode === 'add' ? 'Create Profile' : 'Apply Changes'}
-                                                </button>
-                                            </form>
-                                        </div>
-                                    ) : (
-                                        <div className="p-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                            {members.map(m => (
-                                                <div key={`reg-member-card-${m.id}`} className="p-6 rounded-[2rem] bg-white border border-slate-100 flex items-center justify-between group hover:border-indigo-500 transition-all shadow-sm hover:shadow-md">
+                                <div className="flex-1 overflow-y-auto p-12 bg-slate-50">
+                                    {regMode==='view'?(
+                                        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                                            {members.map(m=>(
+                                                <div key={m.id} className="registry-card flex justify-between items-center group">
                                                     <div className="flex items-center gap-4">
-                                                        <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-sm shadow-lg shadow-slate-200">{m.num}</div>
-                                                        <div className="overflow-hidden">
-                                                            <p className="text-xs font-black truncate max-w-[120px]">{m.name}</p>
-                                                            <Badge p={m}/>
-                                                        </div>
+                                                        <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-lg">{m.num}</div>
+                                                        <div><p className="font-black text-sm text-slate-800 leading-none mb-1 uppercase">{m.name}</p><Badge p={m}/></div>
                                                     </div>
-                                                    <div className="flex gap-1">
-                                                        <button onClick={() => {setEditingMember(m); setRegMode('edit');}} className="p-2.5 text-indigo-500 hover:bg-indigo-50 rounded-xl transition-colors"><Icon name="edit-3" size={18} /></button>
-                                                        <button onClick={() => {if(confirm(`Delete ${m.name}?`)) db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('members').doc(m.id).delete()}} className="p-2.5 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"><Icon name="trash" size={18} /></button>
+                                                    <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button onClick={()=>{setEditingMember(m);setRegMode('edit')}} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Icon name="edit-3" size={16}/></button>
+                                                        <button onClick={()=>{if(confirm(`Delete ${m.name}?`)) db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('members').doc(m.id).delete()}} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Icon name="trash" size={16}/></button>
                                                     </div>
                                                 </div>
                                             ))}
                                         </div>
+                                    ):(
+                                        <form onSubmit={saveMember} className="max-w-xl mx-auto bg-white p-12 rounded-[3rem] shadow-xl border border-slate-100 space-y-8">
+                                            <div className="grid grid-cols-4 gap-4">
+                                                <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">ID #</label><input name="num" type="number" defaultValue={editingMember?.num} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-xl outline-none focus:border-indigo-500" required /></div>
+                                                <div className="col-span-3 space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Full Name</label><input name="name" type="text" defaultValue={editingMember?.name} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-xl outline-none focus:border-indigo-500" required /></div>
+                                            </div>
+                                            <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Gender Profile</label>
+                                                <select name="gender" defaultValue={editingMember?.isMale?'male':'female'} className="w-full p-4 bg-slate-50 border-2 rounded-2xl font-black text-lg outline-none focus:border-indigo-500">
+                                                    <option value="female">Female Profile</option><option value="male">Male Profile</option>
+                                                </select>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-4">
+                                                {[ 
+                                                    {k:'eng', l:'English', i:'languages'}, 
+                                                    {k:'drv', l:'Driver', i:'user-check'}, 
+                                                    {k:'car', l:'Vehicle', i:'car'} 
+                                                ].map(({k,l,i}) => (
+                                                    <label key={k} className="flex flex-col items-center p-6 bg-slate-50 border-2 rounded-3xl cursor-pointer hover:bg-white hover:border-indigo-500 transition-all">
+                                                        <Icon name={i} size={32} className="text-slate-300 mb-2" />
+                                                        <span className="text-[10px] font-black uppercase mb-3 text-slate-500">{l}</span>
+                                                        <input type="checkbox" name={k} defaultChecked={editingMember?.[k==='eng'?'isEnglish':k==='drv'?'isDriver':'hasCar']} className="w-6 h-6 accent-indigo-600" />
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <button className="w-full bg-indigo-600 text-white py-6 rounded-3xl font-black uppercase text-lg shadow-xl shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all">Save Member Profile</button>
+                                        </form>
                                     )}
                                 </div>
                             </div>
